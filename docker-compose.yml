@@ -1,0 +1,35 @@
+
+# although these are defined together, they're intended to be run separately i.e:
+#
+# - `docker compose up auth` # note not detatched, we want to see output for 2FA
+# - `docker compose up vpn -d` # note detatched
+services:
+  auth:
+    build:
+      context: ./auth
+    env_file: auth.env
+    # writes config.env to current dir
+    volumes:
+      - .:/app/output
+
+  vpn:
+    build:
+      context: vpn
+    # note this means that auth needs to be run separately, cause config.env is parsed at startup
+    env_file: config.env
+    ports:
+      - "1080:1080"  # SOCKS proxy port
+      - "8118:8118"  # HTTP proxy port
+      - "8000:8000"
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - .:/config
+
+    
+  proxy:
+    network_mode: "service:vpn"
+    build:
+      context:
+        ./proxy
+    restart: unless-stopped
