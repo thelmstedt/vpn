@@ -25,7 +25,9 @@ services:
       - NET_ADMIN
     volumes:
       - .:/config
-
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     
   proxy:
     network_mode: "service:vpn"
@@ -33,3 +35,14 @@ services:
       context:
         ./proxy
     restart: unless-stopped
+    depends_on:
+      - vpn
+
+  heartbeat:
+    network_mode: "service:vpn"
+    build:
+      context:
+        ./heartbeat
+    restart: unless-stopped
+    depends_on:
+      - vpn
