@@ -4,7 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
 && apt-get install -y --no-install-recommends \
-openconnect curl net-tools netcat-traditional \
+openconnect curl net-tools netcat-traditional dnsutils \
 && apt-get update \
 && apt-get upgrade -y \
 && apt-get remove -fy \

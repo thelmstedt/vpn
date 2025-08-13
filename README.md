@@ -27,7 +27,7 @@ Stop reading now
 
 Ok you hate your VPN, I get it.
 
-We're going to be running VPN in an isolated container, with a SOCKS/HTTP proxy
+We're going to be running VPN in an isolated container, with a SOCKS/HTTP/DNS proxy
 
 IMPORTANT: run this to allow namespace switching
 
@@ -43,11 +43,21 @@ These zsh aliases make using this easier
     alias -g vpndo="nsenter --target $(docker inspect --format '{{.State.Pid}}' vpn-vpn-1) --net --setuid $(id -u)"
     alias -g pp="https_proxy=http://localhost:8118 http_proxy=http://localhost:8118"
 
+### DNS via dnsmasq
+
+Your vpn may create some resolv.conf entries to point to special vpn dns servers - but this is inside a container now
+and we don't have access to it from our netns'd host
+
+we run a dnsmasq on 127.0.0.53 to proxy the dns-defined DNS servers
+
+we also test each one since my corporate vpns keep randomly breaking 
+
+### testing
+
 Now we can test namespace usage:
     
     vpndo whoami
     vpndo id
-
 
 We now have a VPN in a network namespace, a http(s) proxy on localhost:8118, and a socks5 proxy on localhost:1080
 
