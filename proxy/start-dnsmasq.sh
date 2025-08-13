@@ -24,6 +24,7 @@ fi
 echo "DNS: starting dnsmasq with: $GOOD_NS"
 exec dnsmasq \
     --no-daemon \
+    --listen-address=127.0.0.1 \
     --listen-address=127.0.0.53 \
     --bind-interfaces \
     --no-hosts \
