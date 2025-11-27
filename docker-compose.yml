@@ -4,14 +4,6 @@
 # - `docker compose up auth` # note not detatched, we want to see output for 2FA
 # - `docker compose up vpn -d` # note detatched
 services:
-  auth:
-    build:
-      context: ./auth
-    env_file: auth.env
-    # writes config.env to current dir
-    volumes:
-      - .:/app/output
-
   vpn:
     build:
       context: vpn
@@ -19,24 +11,26 @@ services:
     env_file: config.env
     ports:
       - "1080:1080"  # SOCKS proxy port
-      - "8118:8118"  # HTTP proxy port
-      - "8000:8000"
     cap_add:
       - NET_ADMIN
     volumes:
       - .:/config
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
-    
-  proxy:
+
+  socks:
     network_mode: "service:vpn"
+    build:
+      context:
+        ./socks
+    restart: unless-stopped
+    depends_on:
+      - vpn
+
+  proxy:
+    network_mode: "host"
     build:
       context:
         ./proxy
     restart: unless-stopped
-    depends_on:
-      - vpn
 
   heartbeat:
     network_mode: "service:vpn"

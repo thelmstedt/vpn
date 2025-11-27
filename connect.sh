@@ -17,6 +17,6 @@ if [ "$MODE" = "direct" ]; then
     . ./config.env
     sudo openconnect --cookie=$OPENCONNECT_AUTH_COOKIE --servercert=$OPENCONNECT_AUTH_SERVERCERT --server $OPENCONNECT_AUTH_SERVER
 else
-    docker compose up vpn proxy heartbeat -d
-    docker compose logs vpn proxy heartbeat -f
+    docker compose up  -d
+    docker compose logs -f
 fi
