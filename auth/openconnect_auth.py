@@ -85,7 +85,7 @@ class _SSOResult:
     sso_token: str
 
 
-_SUPPORTED_BROWSER = ['chromium']
+_SUPPORTED_BROWSER = ['firefox']
 
 
 async def _do_sso_auth(init_result: _InitResult, user: str, password: str,
