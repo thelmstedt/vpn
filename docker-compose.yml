@@ -1,20 +1,22 @@
-
-# although these are defined together, they're intended to be run separately i.e:
-#
-# - `docker compose up auth` # note not detatched, we want to see output for 2FA
-# - `docker compose up vpn -d` # note detatched
 services:
   vpn:
     build:
       context: vpn
     # note this means that auth needs to be run separately, cause config.env is parsed at startup
     env_file: config.env
+    # so restarting is probably bad because it wont have valid keys anymore
+    restart: no
     ports:
-      - "1080:1080"  # SOCKS proxy port
+      - "0.0.0.0:1080:1080"  # SOCKS proxy port - accessible on LAN
     cap_add:
       - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
     volumes:
       - .:/config
+    networks:
+      vpn-net:
+        ipv4_address: 10.99.0.10
 
   socks:
     network_mode: "service:vpn"
@@ -40,3 +42,31 @@ services:
     restart: unless-stopped
     depends_on:
       - vpn
+
+  wireguard:
+    build:
+      context: wireguard
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
+    ports:
+      - "51820:51820/udp"
+    volumes:
+      - ./wireguard/config:/config
+    environment:
+      - VPN_CONTAINER_IP=10.99.0.10
+    networks:
+      vpn-net:
+        ipv4_address: 10.99.0.20
+    depends_on:
+      - vpn
+    restart: unless-stopped
+
+networks:
+  vpn-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.99.0.0/24
+          gateway: 10.99.0.1

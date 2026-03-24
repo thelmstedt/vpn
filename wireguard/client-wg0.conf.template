@@ -1,0 +1,29 @@
+# WireGuard Client Configuration for VPN Split Tunneling
+# Place this in /etc/wireguard/wg0.conf on your host
+
+[Interface]
+PrivateKey = CLIENT_PRIVATE_KEY_PLACEHOLDER
+Address = 10.99.1.2/32
+DNS = 10.99.1.1
+# Only needed when this client runs on the SAME HOST as the Docker stack.
+# wg-quick's suppress_prefixlength rule protects routes that are already in
+# the main table (e.g. the Docker bridge 10.99.0.0/24 for traffic TO those
+# containers). But traffic FROM Docker containers being forwarded to the
+# internet has the Docker IP as source, no more-specific destination route,
+# so it falls through to wg0 → wireguard container → Docker bridge → host
+# → wg0 again: a loop that kills OpenConnect inside the vpn container.
+# These PostUp/PreDown rules add a high-priority source-based rule that
+# sends Docker-originated forwarded traffic straight out via the main table
+# (real default route), bypassing the WireGuard table entirely.
+# Remove these two lines if using this config from a remote machine.
+PostUp = ip rule add from 10.99.0.0/24 table main priority 100
+PreDown = ip rule del from 10.99.0.0/24 table main priority 100
+
+[Peer]
+PublicKey = SERVER_PUBLIC_KEY_PLACEHOLDER
+Endpoint = 127.0.0.1:51820
+# Full tunnel. wg-quick adds a suppress_prefixlength routing rule so any
+# more-specific route in the main table (e.g. your LAN's 192.168.0.0/24) wins
+# automatically — LAN traffic never enters the tunnel.
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
