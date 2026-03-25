@@ -89,13 +89,18 @@ _SUPPORTED_BROWSER = ['firefox']
 
 
 async def _do_sso_auth(init_result: _InitResult, user: str, password: str,
-                       screenshot_dir: Optional[Path] = None, debug: bool = False) -> _SSOResult:
+                       screenshot_dir: Optional[Path] = None, debug: bool = False,
+                       profile_dir: Optional[Path] = None) -> _SSOResult:
+    if profile_dir is None:
+        profile_dir = Path.home() / '.local' / 'share' / 'vpn-auth-firefox-profile'
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
     async with async_playwright() as p:
         for browser_name in _SUPPORTED_BROWSER:
             try:
-                browser = await getattr(p, browser_name).launch(
+                context = await getattr(p, browser_name).launch_persistent_context(
+                    str(profile_dir),
                     headless=not debug,
-                    args=['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
                 )
                 break
             except Exception as e:
@@ -103,7 +108,7 @@ async def _do_sso_auth(init_result: _InitResult, user: str, password: str,
         else:
             raise ValueError("Cannot find playwright browser. Please run: playwright install")
 
-        page = await browser.new_page()
+        page = await context.new_page()
         try:
             await page.goto(init_result.login_url)
             logger.info("Process login page")
@@ -164,7 +169,7 @@ async def _do_sso_auth(init_result: _InitResult, user: str, password: str,
                     pass
 
             logger.info("Complete SSO login")
-            cookies = await page.context.cookies(urls=init_result.login_url_final)
+            cookies = await context.cookies(urls=init_result.login_url_final)
         except Exception as e:
             if screenshot_dir is None:
                 screenshot_dir = Path.cwd()
@@ -241,7 +246,7 @@ class AuthResult:
 
 
 async def openconnect_auth(user: str, password: str, server: str, screenshot_dir: Optional[Path] = None,
-                           debug: bool = False) -> AuthResult:
+                           debug: bool = False, profile_dir: Optional[Path] = None) -> AuthResult:
     async with _build_session() as session:
         # resolve server url
         server = await _resolve_server_address(session=session, url=server)
@@ -253,7 +258,8 @@ async def openconnect_auth(user: str, password: str, server: str, screenshot_dir
         # auth via browser
         logger.info(f"Run SSO auth")
         sso_result = await _do_sso_auth(
-            init_result=init_result, user=user, password=password, screenshot_dir=screenshot_dir, debug=debug
+            init_result=init_result, user=user, password=password, screenshot_dir=screenshot_dir,
+            debug=debug, profile_dir=profile_dir
         )
 
         # send final request
@@ -279,6 +285,8 @@ def main(args=None):
     parser.add_argument('--server', help='server', required=True)
     parser.add_argument('--output-config', help='Output config with auth results', required=True)
     parser.add_argument('--debug', help="Debug mode", action='store_true')
+    parser.add_argument('--profile-dir', help='Firefox profile directory for persisting cert exceptions',
+                        default=None)
     parsed_args = parser.parse_args(args)
 
     output_result = Path(parsed_args.output_config)
@@ -291,11 +299,13 @@ def main(args=None):
     password = parsed_args.password or os.environ.get(f'{_ENV_PREFIX}PASSWORD')
     if not password:
         raise ValueError("password isn't specified")
+    profile_dir = Path(parsed_args.profile_dir) if parsed_args.profile_dir else None
     result = asyncio.run(openconnect_auth(
         user=user,
         password=password,
         server=parsed_args.server,
-        debug=parsed_args.debug
+        debug=parsed_args.debug,
+        profile_dir=profile_dir,
     ))
 
     logger.info("Save results")
