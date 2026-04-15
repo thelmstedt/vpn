@@ -53,11 +53,13 @@ cat > "$CLIENTS_DIR/$NAME.conf" <<EOF
 [Interface]
 PrivateKey = $CLIENT_PRIVATE_KEY
 Address = $CLIENT_IP/32
-DNS = 10.99.1.1
+DNS = 10.99.0.10
+MTU = 1280
 # Prevents a routing loop when this client runs on the same host as the
 # Docker stack. Harmless no-op on remote machines (rule never matches).
 PostUp = ip rule add from 10.99.0.0/24 table main priority 100
 PreDown = ip rule del from 10.99.0.0/24 table main priority 100
+
 
 [Peer]
 PublicKey = $SERVER_PUBLIC_KEY

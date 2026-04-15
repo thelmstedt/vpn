@@ -4,7 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
 && apt-get install -y --no-install-recommends \
-openconnect inotify-tools curl net-tools netcat-traditional dnsutils iptables \
+openconnect inotify-tools curl net-tools netcat-traditional dnsutils iptables iproute2 \
 && apt-get update \
 && apt-get upgrade -y \
 && apt-get remove -fy \

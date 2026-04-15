@@ -4,6 +4,7 @@ set -e
 # Export DNS info to shared volume whenever resolv.conf changes.
 # The WireGuard container reads from wireguard/config/vpn-dns and vpn-domains.
 export_dns() {
+    mkdir -p /config/wireguard/config
     grep '^nameserver' /etc/resolv.conf \
         | awk '{print $2}' \
         | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \

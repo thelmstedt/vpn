@@ -52,46 +52,7 @@ ip rule add from 10.99.1.0/24 table 100
 # NAT traffic from WireGuard clients out through the VPN container
 iptables -t nat -A POSTROUTING -s 10.99.1.0/24 -o eth0 -j MASQUERADE
 
-# Wait for the VPN container to connect and write its DNS info
-echo "WireGuard: waiting for VPN DNS info..."
-for i in {1..30}; do
-    [ -s /config/vpn-dns ] && break
-    sleep 2
-done
-
-if [ ! -s /config/vpn-dns ]; then
-    echo "WireGuard: VPN DNS not available, falling back to 8.8.8.8"
-    VPN_DNS=8.8.8.8
-    CORP_DOMAINS=""
-else
-    VPN_DNS=$(head -1 /config/vpn-dns)
-    CORP_DOMAINS=$(cat /config/vpn-domains 2>/dev/null || true)
-fi
-
-# Split DNS: corp domains -> VPN DNS, everything else -> 8.8.8.8
-DNS_ARGS=""
-if [ -n "$CORP_DOMAINS" ]; then
-    for domain in $CORP_DOMAINS; do
-        DNS_ARGS="$DNS_ARGS --server=/${domain}/${VPN_DNS}"
-    done
-    echo "WireGuard: split DNS — corp domains via $VPN_DNS, rest via 8.8.8.8"
-else
-    echo "WireGuard: no corp domains found, forwarding all to VPN DNS ($VPN_DNS)"
-    DNS_ARGS="--server=$VPN_DNS"
-fi
-
-dnsmasq \
-    --no-daemon \
-    --listen-address=10.99.1.1 \
-    --bind-interfaces \
-    --no-hosts \
-    --no-resolv \
-    --cache-size=1000 \
-    $DNS_ARGS \
-    --server=8.8.8.8 \
-    --log-queries &
-
 echo "WireGuard: ready"
 wg show
 
-tail -f /dev/null
+sleep infinity

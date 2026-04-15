@@ -4,7 +4,7 @@
 [Interface]
 PrivateKey = CLIENT_PRIVATE_KEY_PLACEHOLDER
 Address = 10.99.1.2/32
-DNS = 10.99.1.1
+DNS = 10.99.0.10
 # Only needed when this client runs on the SAME HOST as the Docker stack.
 # wg-quick's suppress_prefixlength rule protects routes that are already in
 # the main table (e.g. the Docker bridge 10.99.0.0/24 for traffic TO those

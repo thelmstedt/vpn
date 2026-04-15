@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 
 RUN apt-get update \
-&& apt-get install -y --no-install-recommends ca-certificates curl wireguard-tools iptables iproute2 procps dnsmasq \
+&& apt-get install -y --no-install-recommends ca-certificates curl wireguard-tools iptables iproute2 procps \
 && apt-get upgrade -y \
 && apt-get autoclean -y \
 && apt-get autoremove -y \

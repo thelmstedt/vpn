@@ -7,7 +7,8 @@ services:
     # so restarting is probably bad because it wont have valid keys anymore
     restart: no
     ports:
-      - "0.0.0.0:1080:1080"  # SOCKS proxy port - accessible on LAN
+      - "1080:1080"  # SOCKS5 (microsocks)
+      - "8118:8118"  # HTTP (privoxy)
     cap_add:
       - NET_ADMIN
     sysctls:
@@ -18,6 +19,24 @@ services:
       vpn-net:
         ipv4_address: 10.99.0.10
 
+
+  dns:
+    network_mode: "service:vpn"
+    build:
+      context: ./dns
+    volumes:
+      - ./wireguard/config:/config
+    restart: unless-stopped
+    depends_on:
+      - vpn
+
+  proxy:
+    network_mode: "service:vpn"
+    build:
+      context:
+        ./proxy
+    restart: unless-stopped
+
   socks:
     network_mode: "service:vpn"
     build:
@@ -26,13 +45,6 @@ services:
     restart: unless-stopped
     depends_on:
       - vpn
-
-  proxy:
-    network_mode: "host"
-    build:
-      context:
-        ./proxy
-    restart: unless-stopped
 
   heartbeat:
     network_mode: "service:vpn"
