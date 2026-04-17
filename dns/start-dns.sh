@@ -18,7 +18,9 @@ dnsmasq \
     --no-daemon \
     --no-hosts \
     --no-resolv \
-    --cache-size=1000 \
+    --cache-size=10000 \
+    --min-cache-ttl=300 \
+    --dns-forward-max=300 \
     --log-queries \
     --log-facility=- \
     --servers-file=/etc/dnsmasq-vpn.conf &
