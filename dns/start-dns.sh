@@ -20,6 +20,7 @@ dnsmasq \
     --no-resolv \
     --cache-size=1000 \
     --log-queries \
+    --log-facility=- \
     --servers-file=/etc/dnsmasq-vpn.conf &
 DNSMASQ_PID=$!
 

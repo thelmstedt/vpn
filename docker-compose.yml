@@ -36,6 +36,9 @@ services:
       context:
         ./proxy
     restart: unless-stopped
+    depends_on:
+      - vpn
+      - dns
 
   socks:
     network_mode: "service:vpn"
@@ -45,6 +48,7 @@ services:
     restart: unless-stopped
     depends_on:
       - vpn
+      - dns
 
   heartbeat:
     network_mode: "service:vpn"

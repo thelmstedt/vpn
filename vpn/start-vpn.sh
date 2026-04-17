@@ -4,6 +4,9 @@ set -e
 # Export DNS info to shared volume whenever resolv.conf changes.
 # The WireGuard container reads from wireguard/config/vpn-dns and vpn-domains.
 export_dns() {
+    # Skip if we already redirected to dnsmasq (prevents inotifywait loop)
+    grep -q '^nameserver 127.0.0.1$' /etc/resolv.conf 2>/dev/null && return
+
     mkdir -p /config/wireguard/config
     grep '^nameserver' /etc/resolv.conf \
         | awk '{print $2}' \
@@ -13,6 +16,9 @@ export_dns() {
         | awk '{for(i=2;i<=NF;i++) print $i}' \
         | grep -v '^$' | sort -u \
         > /config/wireguard/config/vpn-domains
+
+    # Point all containers in this netns at dnsmasq
+    echo "nameserver 127.0.0.1" > /etc/resolv.conf
 }
 
 (
