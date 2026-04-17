@@ -29,6 +29,9 @@ export_dns() {
 # responses return correctly. The rule can be set before tun0 exists — Linux
 # applies it once the interface appears.
 iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
+iptables -t nat -A POSTROUTING -d 10.99.0.10 -p tcp --dport 1080 -j MASQUERADE
+iptables -t nat -A POSTROUTING -d 10.99.0.10 -p tcp --dport 8118 -j MASQUERADE
+ip route add 192.168.0.0/24 via 10.99.0.1
 
 exec openconnect \
     --cookie=$OPENCONNECT_AUTH_COOKIE \
