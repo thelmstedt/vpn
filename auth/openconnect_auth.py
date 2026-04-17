@@ -4,14 +4,16 @@ import asyncio
 import json
 import logging
 import os
+import playwright
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from playwright.async_api import async_playwright
 from typing import Optional
-import playwright
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_CDP_URL = "http://localhost:9222"
 
 
 async def _resolve_server_address(session: aiohttp.ClientSession, url: str) -> str:
@@ -28,15 +30,17 @@ def _get_field(elem: ET.Element, name: str) -> str:
 
 
 def _build_session() -> aiohttp.ClientSession:
-    return aiohttp.ClientSession(headers={
-        "User-Agent": "AnyConnect Linux_64 4.7.00136",
-        "Accept": "*/*",
-        "Accept-Encoding": "identity",
-        "X-Transcend-Version": "1",
-        "X-Aggregate-Auth": "1",
-        "X-Support-HTTP-Auth": "true",
-        "Content-Type": "application/x-www-form-urlencoded",
-    })
+    return aiohttp.ClientSession(
+        headers={
+            "User-Agent": "AnyConnect Linux_64 4.7.00136",
+            "Accept": "*/*",
+            "Accept-Encoding": "identity",
+            "X-Transcend-Version": "1",
+            "X-Aggregate-Auth": "1",
+            "X-Support-HTTP-Auth": "true",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+    )
 
 
 @dataclass
@@ -85,68 +89,45 @@ class _SSOResult:
     sso_token: str
 
 
-_SUPPORTED_BROWSER = ['firefox']
-
-
-async def _do_sso_auth(init_result: _InitResult, user: str, password: str,
-                       screenshot_dir: Optional[Path] = None, debug: bool = False,
-                       profile_dir: Optional[Path] = None) -> _SSOResult:
-    if profile_dir is None:
-        profile_dir = Path.home() / '.local' / 'share' / 'vpn-auth-firefox-profile'
-    profile_dir.mkdir(parents=True, exist_ok=True)
-
+async def _do_sso_auth(
+        init_result: _InitResult,
+        screenshot_dir: Optional[Path] = None,
+        debug: bool = False,
+        cdp_url: str = _DEFAULT_CDP_URL
+) -> _SSOResult:
     async with async_playwright() as p:
-        for browser_name in _SUPPORTED_BROWSER:
-            try:
-                context = await getattr(p, browser_name).launch_persistent_context(
-                    str(profile_dir),
-                    headless=not debug,
-                )
-                break
-            except Exception as e:
-                logger.info(f"Fail to user: {browser_name}: {e}. Try another browser")
-        else:
-            raise ValueError("Cannot find playwright browser. Please run: playwright install")
+        try:
+            browser = await p.chromium.connect_over_cdp(cdp_url)
+        except Exception as e:
+            raise ValueError(
+                f"Cannot connect to chrome at {cdp_url}. "
+                f"Is chrome running with --remote-debugging-port? Error: {e}"
+            )
 
+        # attach to existing context so we get the user's cookies/session,
+        # don't create a fresh incognito-ish one
+        context = browser.contexts[0] if browser.contexts else await browser.new_context()
         page = await context.new_page()
+
         try:
             await page.goto(init_result.login_url)
-            logger.info("Process login page")
+            logger.info("Loaded login page; waiting for redirect to final url")
 
-            login_field = await page.wait_for_selector('input[name="loginfmt"]:not(.moveOffScreen)')
-            await login_field.wait_for_element_state('stable')
-            await login_field.fill(user)
-            await asyncio.sleep(1)
-            next_button = await page.wait_for_selector('input[type="submit"]:not(.moveOffScreen)')
-            await next_button.wait_for_element_state('stable')
-            await next_button.click()
-
-            logger.info("Process password page")
-            passwd_field = await page.wait_for_selector('input[name="passwd"]:not(.moveOffScreen)')
-            await passwd_field.wait_for_element_state('stable')
-            await passwd_field.fill(password)
-            await asyncio.sleep(1)
-            next_button = await page.wait_for_selector('input[type="submit"]:not(.moveOffScreen)')
-            await next_button.wait_for_element_state('stable')
-            await next_button.click()
-
-            mfa_code = await page.locator("#idRichContext_DisplaySign").inner_text()
-            logger.info("Wait app authentication confirmation with secret code:" + mfa_code)
+            # since the user's already logged into msft in this profile, microsoft
+            # will (usually) silently redirect through to login_url_final without
+            # showing any form. if it DOES show a form, the user fills it in manually —
+            # we just wait.
+            final_url = init_result.login_url_final.strip().lower()
 
             while True:
                 try:
-                    await asyncio.sleep(3)
-                    await page.wait_for_load_state('networkidle', timeout=5000)
-
+                    await asyncio.sleep(2)
                     current_url = page.url.strip().lower()
-                    final_url = init_result.login_url_final.strip().lower()
-
                     if current_url == final_url:
-                        logger.info("Successfully forwarded to login_url_final")
+                        logger.info("Reached login_url_final")
                         break
 
                     try:
-                        await asyncio.sleep(3.0)
                         content = await page.content()
                         if "You have successfully authenticated" in content:
                             logger.info("Received anyconnect success page")
@@ -154,44 +135,47 @@ async def _do_sso_auth(init_result: _InitResult, user: str, password: str,
                     except playwright._impl._errors.Error:
                         pass
 
+                    # auto-click "stay signed in?" if it shows up
                     try:
-                        stay_signed_in_btn = await page.wait_for_selector('#idSIButton9', timeout=100.0)
-                        await stay_signed_in_btn.wait_for_element_state('stable')
-                        await stay_signed_in_btn.wait_for_element_state('enabled')
-                        await stay_signed_in_btn.click()
+                        stay_btn = await page.wait_for_selector('#idSIButton9', timeout=200)
+                        await stay_btn.click()
                     except Exception:
                         pass
-
-                    logger.info("Wait app authentication confirmation with secret code:" + mfa_code)
-                    await asyncio.sleep(1.0)
 
                 except playwright._impl._errors.TimeoutError:
                     pass
 
-            logger.info("Complete SSO login")
             cookies = await context.cookies(urls=init_result.login_url_final)
-        except Exception as e:
+
+        except Exception:
             if screenshot_dir is None:
                 screenshot_dir = Path.cwd()
-            screenshot_path = screenshot_dir.joinpath('azure_sso_error.png')
-            logger.exception(f"Save screenshot of error to: {screenshot_path}")
-            screenshot_content = await page.screenshot(type='png')
-            screenshot_path.write_bytes(screenshot_content)
+            screenshot_path = screenshot_dir.joinpath('sso_error.png')
+            logger.exception(f"Saving screenshot of error to: {screenshot_path}")
+            try:
+                screenshot_content = await page.screenshot(type='png')
+                screenshot_path.write_bytes(screenshot_content)
+            except Exception:
+                pass
             raise
+        finally:
+            # close the tab but NOT the browser (not ours to close)
+            try:
+                await page.close()
+            except Exception:
+                pass
 
-        # get session token
         for cookie_record in cookies:
             if cookie_record['name'].lower() == init_result.token_cookie_name.lower():
                 sso_token = cookie_record['value']
                 break
         else:
-            raise ValueError(f"Cannot find session token \"{init_result.token_cookie_name}\" in the cookie:\n"
-                             f"{json.dumps(cookies, indent=4)}")
+            raise ValueError(
+                f"Cannot find session token \"{init_result.token_cookie_name}\" in the cookie:\n"
+                f"{json.dumps(cookies, indent=4)}"
+            )
 
-        return _SSOResult(
-            cookies=cookies,
-            sso_token=sso_token
-        )
+        return _SSOResult(cookies=cookies, sso_token=sso_token)
 
 
 @dataclass
@@ -218,8 +202,10 @@ def _render_final_request(sso_token: str, init_response: ET.Element) -> bytes:
 '''.lstrip().encode('utf-8')
 
 
-async def _to_final_request(session: aiohttp.ClientSession, server: str, init_result: _InitResult,
-                            sso_result: _SSOResult, debug: bool = False) -> _FinalResult:
+async def _to_final_request(
+        session: aiohttp.ClientSession, server: str, init_result: _InitResult,
+        sso_result: _SSOResult, debug: bool = False
+) -> _FinalResult:
     request_data = _render_final_request(sso_token=sso_result.sso_token, init_response=init_result.response)
     async with session.post(server, data=request_data) as response:
         response_raw = await response.text()
@@ -245,24 +231,23 @@ class AuthResult:
     server: str
 
 
-async def openconnect_auth(user: str, password: str, server: str, screenshot_dir: Optional[Path] = None,
-                           debug: bool = False, profile_dir: Optional[Path] = None) -> AuthResult:
+async def openconnect_auth(
+        server: str,
+        screenshot_dir: Optional[Path] = None,
+        debug: bool = False,
+        cdp_url: str = _DEFAULT_CDP_URL
+) -> AuthResult:
     async with _build_session() as session:
-        # resolve server url
         server = await _resolve_server_address(session=session, url=server)
 
-        # initial request
         logger.info("Start authentication")
         init_result = await _do_init_request(session=session, server=server, debug=debug)
 
-        # auth via browser
-        logger.info(f"Run SSO auth")
+        logger.info("Run SSO auth via chrome cdp")
         sso_result = await _do_sso_auth(
-            init_result=init_result, user=user, password=password, screenshot_dir=screenshot_dir,
-            debug=debug, profile_dir=profile_dir
+            init_result=init_result, screenshot_dir=screenshot_dir, debug=debug, cdp_url=cdp_url,
         )
 
-        # send final request
         final_result = await _to_final_request(
             session=session, server=server, init_result=init_result, sso_result=sso_result, debug=debug
         )
@@ -274,39 +259,29 @@ async def openconnect_auth(user: str, password: str, server: str, screenshot_dir
         )
 
 
-_ENV_PREFIX = "OPENCONNECT_AUTH_"
-
-
 def main(args=None):
     logging.basicConfig(level=logging.INFO, format='{asctime} {levelname} [{name}] {message}', style='{')
     parser = argparse.ArgumentParser()
-    parser.add_argument('--user', help='username')
-    parser.add_argument('--password', help='password')
     parser.add_argument('--server', help='server', required=True)
     parser.add_argument('--output-config', help='Output config with auth results', required=True)
     parser.add_argument('--debug', help="Debug mode", action='store_true')
-    parser.add_argument('--profile-dir', help='Firefox profile directory for persisting cert exceptions',
-                        default=None)
+    parser.add_argument(
+        '--cdp-url', help='chrome devtools protocol url',
+        default=_DEFAULT_CDP_URL
+    )
     parsed_args = parser.parse_args(args)
 
     output_result = Path(parsed_args.output_config)
     if not output_result.parent.is_dir():
         raise ValueError(f"Output config directory \"{output_result.parent}\" doesn't exist")
 
-    user = parsed_args.user or os.environ.get(f'{_ENV_PREFIX}USER')
-    if not user:
-        raise ValueError("user isn't specified")
-    password = parsed_args.password or os.environ.get(f'{_ENV_PREFIX}PASSWORD')
-    if not password:
-        raise ValueError("password isn't specified")
-    profile_dir = Path(parsed_args.profile_dir) if parsed_args.profile_dir else None
-    result = asyncio.run(openconnect_auth(
-        user=user,
-        password=password,
-        server=parsed_args.server,
-        debug=parsed_args.debug,
-        profile_dir=profile_dir,
-    ))
+    result = asyncio.run(
+        openconnect_auth(
+            server=parsed_args.server,
+            debug=parsed_args.debug,
+            cdp_url=parsed_args.cdp_url,
+        )
+    )
 
     logger.info("Save results")
     with output_result.open('w', encoding='utf-8') as f:
