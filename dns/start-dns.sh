@@ -21,7 +21,7 @@ dnsmasq \
     --cache-size=10000 \
     --min-cache-ttl=300 \
     --dns-forward-max=300 \
-    --log-queries \
+    --log-queries=extra \
     --log-facility=- \
     --servers-file=/etc/dnsmasq-vpn.conf &
 DNSMASQ_PID=$!
