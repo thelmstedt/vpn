@@ -2,159 +2,91 @@
 
 Corporate VPN is awful, how to avoid using it except when absolutely necessary.
 
-WireGuard available for transparent full-tunnel routing. See [WireGuard](#wireguard) below.
-
-# auth
-
-Make sure you have `auth.env`
-
-    CLV_USERNAME=
-    CLV_PASSWORD=
-    CLV_SERVER=
-
-Then just run `auth.sh` which results in `config.env` for the next stage
-
-## avoiding all this bullshit
-
-run openconnect directly for normal usage
-
-    . ./config.env
-    sudo openconnect --cookie=$OPENCONNECT_AUTH_COOKIE \
-        --servercert=$OPENCONNECT_AUTH_SERVERCERT \
-        --server $OPENCONNECT_AUTH_SERVER
-
-Stop reading now
-
-## but i want my life to be difficult
-
-Ok you hate your VPN, I get it.
-
 We're going to be running VPN in an isolated container, with a SOCKS/HTTP/DNS proxy
-
-### prereqs
-
-IMPORTANT: run this to allow namespace switching
-
-    sudo setcap cap_sys_admin,cap_sys_ptrace,cap_net_admin+ep $(which nsenter)
-
-### usage
-
 
 Docker compose brings up the whole thing
 
     docker compose up
 
-expected usage is either via entering a netns with `vpndo $CMD` or using the proxy `pp $CMD`
+We now have:
 
-    # enter into vpn netns
-    vpndo() {
-        VPN_CONTEXT=1 command nsenter --target $(docker inspect --format "{{.State.Pid}}" vpn-vpn-1) --net --setuid $(id -u) "$@"
-    }
-    
+* vpn in an isolated container
+* a keepalive heartbeat
+* a dnsmasq republishing the discovered servers from vpn setup
+* http(s) proxy (using dns) on localhost:8118
+* a socks5 proxy (using dns) on localhost:1080
+* wireguard for directly connecting without reauth
+
+## auth
+
+Authentication must be done separately. You're expected to have `config.env` with:
+
+    OPENCONNECT_AUTH_COOKIE='xxx'
+    OPENCONNECT_AUTH_SERVERCERT='xxx'
+    OPENCONNECT_AUTH_SERVER='https://xxx.example.com'
+
+Run `uv run ./auth/openconnect_auth.py` to auth in a local chrome which has been started with
+`--remote-debugging-port=9222`
+
+## usage
+
+* chrome: needs to be started with `--proxy-server="socks5://$IP_ADDR:1080"`
+* firefox: use container tabs, which can be configured individually to use vpn
+* terminal: use netns (linux only) or `http_proxy/https_proxy` which is usually supported
+
+A useful alias:
+
     # vpn proxy
     alias -g pp="https_proxy=http://localhost:8118 http_proxy=http://localhost:8118"
-
-
-### DNS via dnsmasq
-
-Your vpn may create some resolv.conf entries to point to special vpn dns servers - but this is inside a container now
-and we don't have access to it from our netns'd host
-
-we run a dnsmasq on 127.0.0.53 to proxy the dns-defined DNS servers
-
-we also test each one since my corporate vpns keep randomly breaking
-
-### verify it even works
-
-Now we can test namespace usage:
-
-    vpndo whoami
-    vpndo id
-
-We now have a VPN in a network namespace, a http(s) proxy on localhost:8118, and a socks5 proxy on localhost:1080
-
-We use it either with `vpndo` for shell commands, or http/socks proxies for applications
-
-We can `vpndo zsh` to enter a shell in which everything will use the VPN.
 
 Test it out
 
     $ curl ifconfig.co # no vpn
     159.xxx.xxx.xxx 
 
-    $ vpndo curl ifconfig.co # vpn via network namespace
-    8.xxx.xxx.xxx 
-    
-    $ pp curl ifconfig.co # vpn via http proxy
-    8.xxx.xxx.xxx 
 
     $ curl --socks5 localhost:1080 ifconfig.co # vpn ip via socks
     8.xxx.xxx.xxx 
 
-    $ pp python test.py # look it works for python too
-    Checking external IP address...
-    IP Address: 8.....
-    Country: United States
-    City: Unknown
+### netns
+
+If you're running this on linux you have network namespaces
+
+IMPORTANT: run this to allow namespace switching (linux only)
+
+    sudo setcap cap_sys_admin,cap_sys_ptrace,cap_net_admin+ep $(which nsenter)
+
+We'll use this function in `.zshrc`:
+
+    # enter into vpn netns
+    vpndo() {
+        VPN_CONTEXT=1 command nsenter --target $(docker inspect --format "{{.State.Pid}}" vpn-vpn-1) --net --setuid $(id -u) "$@"
+    }
+
+Test it out:
 
     $ vpndo zsh # enter a shell in the vpn network namespace
-    $ curl ifconfig.co # now everything is in the vpn
-    8.......
+    $ vpndo curl ifconfig.co # or use it for a single command 
 
-Use a separate browser for vpn, or configure a specific firefox container.
+### WireGuard
 
-## WireGuard
+Some services require a little more integration with VPN - e.g docker
 
-All traffic goes through the VPN tunnel. LAN traffic (192.168.0.x) is excluded automatically — `wg-quick` installs a `suppress_prefixlength` routing rule so any more-specific route in your main table wins over the tunnel.
+Wireguard republishes the vpn so you can locally easily connect/disconnect without the auth dance
 
-### Registering a client
+Intention was to extend this to other clients, but realistically it only works on the server, for reasons.
 
 On the server, give the client a name:
 
-```bash
-./setup-wireguard-client.sh laptop
-./setup-wireguard-client.sh phone
-```
+    ./setup-wireguard-client.sh desktop
 
-This generates a keypair, assigns the client an IP (`10.99.1.2`, `.3`, etc.), registers it with the WireGuard server, and saves a config to `wireguard/config/clients/<name>.conf`.
+This generates a keypair, assigns the client an IP (`10.99.1.2`, `.3`, etc.), registers it with the WireGuard server,
+and saves a config to `wireguard/config/clients/<name>.conf`.
 
-Copy it to the client:
+Copy it in place
 
-```bash
-scp wireguard/config/clients/laptop.conf user@laptop:/etc/wireguard/wg0.conf
-```
+    scp wireguard/config/clients/laptop.conf /etc/wireguard/wg0.conf
+    sudo wg-quick up wg0      # connect
+    sudo wg-quick down wg0    # disconnect
+    sudo wg show              # status
 
-Then on the client:
-
-```bash
-sudo wg-quick up wg0
-```
-
-Check the `Endpoint` in the generated config — the script tries to detect the server's LAN IP but you may need to correct it.
-
-### Managing the tunnel
-
-```bash
-sudo wg-quick up wg0      # connect
-sudo wg-quick down wg0    # disconnect
-sudo wg show              # status
-```
-
-### Troubleshooting
-
-```bash
-# Check the wireguard container is up and happy
-docker compose logs wireguard
-
-# Verify the peer is registered
-sudo wg show
-
-# If the tunnel is up but corp DNS isn't resolving
-resolvectl status wg0   # should show DNS: 10.99.1.1
-
-# Nuclear option — regenerate everything
-sudo wg-quick down wg0
-rm wireguard/config/*.key
-docker compose restart wireguard
-./setup-wireguard-client.sh
-```

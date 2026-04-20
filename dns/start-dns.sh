@@ -9,7 +9,14 @@ until [ -s "$VPN_DNS_FILE" ]; do
 done
 
 write_conf() {
+    # Global: all queries go to VPN DNS
     awk '{print "server=" $1}' "$VPN_DNS_FILE" > /etc/dnsmasq-vpn.conf
+
+    # Public AWS services use public DNS (S3, CloudFront, etc.)
+    echo "server=/amazonaws.com/8.8.8.8" >> /etc/dnsmasq-vpn.conf
+
+    # EKS has internal endpoints - override back to VPN DNS
+    awk '{print "server=/eks.amazonaws.com/" $1}' "$VPN_DNS_FILE" >> /etc/dnsmasq-vpn.conf
 }
 
 write_conf
